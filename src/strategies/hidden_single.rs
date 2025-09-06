@@ -1,4 +1,4 @@
-use crate::strategy::{bit, is_single, Hint, Strategy};
+use crate::strategy::{bit, Hint, Strategy};
 use crate::sudoku::Sudoku;
 
 /// Hidden Single: ユニット内で特定の数字を置ける場所が1つ
