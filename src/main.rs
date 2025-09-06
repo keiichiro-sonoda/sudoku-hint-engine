@@ -18,6 +18,9 @@ pub struct Sudoku {
     /// - 各ユニットは 9 マス分のインデックスを持つ（`usize` の 9 要素）。
     /// - 例えば「行の中でその数字が入る場所は1つだけ」のような一意性チェックに使う。
     units: Vec<[usize; 9]>, // 27 ユニット (行9, 列9, ブロック9)
+
+    /// 初期盤面で確定済みのセルを記録（Naked Singleから除外するため）
+    initially_given: [bool; 81], // true = 初期から確定, false = 推論で確定
 }
 
 impl Sudoku {
@@ -30,6 +33,7 @@ impl Sudoku {
             cells: [ALL; 81],
             peers,
             units,
+            initially_given: [false; 81],
         }
     }
 
@@ -65,6 +69,8 @@ impl Sudoku {
         for (i, &byte) in bytes.iter().enumerate() {
             if byte >= b'1' && byte <= b'9' {
                 let digit = (byte - b'0') as usize;
+                // 初期盤面で確定済みとしてマーク
+                sdk.initially_given[i] = true;
                 // set_value: マス i を digit で確定し、その行・列・ブロックの
                 //            他マスから digit の候補を消します
                 sdk.set_value(i, digit);
@@ -90,6 +96,22 @@ impl Sudoku {
         for &peer in &self.peers[cell] {
             self.cells[peer] &= !mask;
         }
+    }
+
+    /// 新しいStrategy基盤用: セルに値を割り当て
+    pub fn assign(&mut self, cell: usize, digit: u8) -> Result<(), ()> {
+        self.set_value(cell, digit as usize);
+        Ok(())
+    }
+
+    /// 新しいStrategy基盤用: セルから候補を除外
+    pub fn eliminate(&mut self, cell: usize, digit: u8) -> Result<(), ()> {
+        let mask = 1u16 << digit;
+        self.cells[cell] &= !mask;
+        if self.cells[cell] == 0 {
+            return Err(()); // 候補が全部なくなった = 矛盾
+        }
+        Ok(())
     }
 
     /// 指定されたセルの候補を表示用文字列に変換します。
@@ -146,115 +168,6 @@ impl Sudoku {
 
         // "[1,3,7]" のような文字列を作成
         format!("[{}]", candidates.join(","))
-    }
-
-    /// ヒント①：「ある数字に注目して、この列/行/ブロックではここにしか置けない」
-    ///
-    /// これは Hidden Single（ヒドゥンシングル）と呼ばれる手法です。
-    /// 
-    /// ## 人間の思考プロセス（例：数字7を考える場合）
-    /// 
-    /// 1. **着目**: 「数字7について考えてみよう」
-    /// 2. **制約確認**: 盤面を見て「あ、ここに7がある。じゃあこの行・列・ブロックには他に7は入らない」
-    /// 3. **候補絞り込み**: 「他の行を見てみよう。この行では7はどこに入るかな？」
-    /// 4. **消去法**: 「ここは既に他の数字が入ってるからダメ」「ここも制約で7が入らない」
-    /// 5. **発見**: 「あ、この行では7はここにしか入らない！確定だ」
-    /// 
-    /// ## プログラムでの実装（人間の思考をそのまま再現）
-    /// 
-    /// 1. **着目** → `for digit in 1..=9`: 数字1〜9を順番に考える
-    /// 2. **制約確認** → 初期化時の`set_value`で既に処理済み（候補マスクから除外済み）
-    /// 3. **候補絞り込み** → `for unit_idx in 0..self.units.len()`: 各行・列・ブロックを順番に調べる
-    /// 4. **消去法** → `filter(|&&cell| self.cells[cell] & mask != 0)`: その数字が候補に残っているセルだけ抽出
-    /// 5. **発見** → `if possible_cells.len() == 1`: 候補が1つだけならヒント生成
-    /// 
-    /// つまり、人間が「この数字はここにしか入らない」と気づく瞬間を、
-    /// プログラムでは「候補リストの長さが1」として機械的に検出しています。
-    pub fn find_hidden_singles(&self) -> Vec<String> {
-        let mut hints = Vec::new();
-
-        // 【人間思考3】候補絞り込み: 各行・列・ブロックを順番に調べる
-        for unit_idx in 0..self.units.len() {
-            let unit = &self.units[unit_idx];
-            let unit_name = if unit_idx < 9 {
-                format!("行{}", unit_idx)
-            } else if unit_idx < 18 {
-                format!("列{}", unit_idx - 9)
-            } else {
-                format!("ブロック{}", unit_idx - 18)
-            };
-
-            // 【人間思考1】着目: 「数字1について考えてみよう」「数字2について考えてみよう」...
-            for digit in 1..=9 {
-                let mask = 1u16 << digit; // この数字のビットマスクを作成
-                
-                // 【人間思考4】消去法: 「この行でdigitが入れるのはどこかな？」
-                // → 「ここは既に他の数字が入ってるからダメ」「ここも制約でdigitが入らない」
-                let possible_cells: Vec<usize> = unit
-                    .iter()
-                    .filter(|&&cell| self.cells[cell] & mask != 0) // digitが候補に残っているセルのみ
-                    .copied()
-                    .collect();
-
-                // 【人間思考5】発見: 「あ、この行ではdigitはここにしか入らない！」
-                if possible_cells.len() == 1 {
-                    let cell = possible_cells[0];
-                    let (r, c) = (cell / 9, cell % 9);
-                    // 既に確定済みでなければヒント生成
-                    if self.cells[cell].count_ones() > 1 {
-                        hints.push(format!(
-                            "数字{}は{}で({},{})にしか置けません",
-                            digit, unit_name, r, c
-                        ));
-                    }
-                }
-            }
-        }
-
-        hints
-    }
-
-    /// ヒント②：「あるマスに注目して、このマスにはこれしか入らない」
-    ///
-    /// これは Naked Single（ネイキッドシングル）と呼ばれる手法です。
-    ///
-    /// 人が頭の中でやっていること（直感的な説明）
-    /// - 1つのマスを見て、そのマスに入れられる数字の候補（1〜9）を考えます。
-    /// - 候補が1個しか残っていなければ、そのマスはその数字で"確定"です。
-    ///
-    /// この関数での実装（プログラム的な説明）
-    /// - 盤面は「ビットマスク」で候補を表現しています（u16 の bit1〜bit9 を使用）。
-    ///   たとえば、bit3 が1なら「3が候補に含まれる」を意味します。
-    /// - 各マスについて、マスク中の1ビット数（候補の個数）を `count_ones()` で数えます。
-    ///   - すでに1個ならそのマスは確定済みなのでスキップ。
-    ///   - 1個より多い場合は、bitが立っている数字だけを列挙して候補リストを作ります。
-    /// - その候補リストの長さがちょうど1なら「このマスにはこの数字しか入らない」というヒント文字列を返します。
-    ///
-    /// 注意
-    /// - この関数は「確定させる処理」はしません。あくまで"ヒント文を作るだけ"です。
-    ///   実際に確定させたい場合は、別途 `set_value` を呼ぶ設計にしています。
-    pub fn find_naked_singles(&self) -> Vec<String> {
-        let mut hints = Vec::new();
-
-        // 全81マスを順にチェック
-        for cell in 0..81 {
-            let mask = self.cells[cell];
-            if mask.count_ones() == 1 {
-                continue; // 既に確定しているマスはスキップ
-            }
-
-            // そのマスの「立っているビット=候補数字」を収集
-            let candidates: Vec<usize> =
-                (1..=9).filter(|&digit| mask & (1 << digit) != 0).collect();
-
-            if candidates.len() == 1 {
-                let digit = candidates[0];
-                let (r, c) = (cell / 9, cell % 9);
-                hints.push(format!("セル({},{})には{}しか入りません", r, c, digit));
-            }
-        }
-
-        hints
     }
 
     /// 盤面を表示
@@ -357,6 +270,266 @@ fn precompute() -> (Vec<Vec<usize>>, Vec<[usize; 9]>) {
     (peers, units)
 }
 
+// ===== Strategy 基盤 =====
+
+/// 数独解法手筋の共通インターフェース
+pub trait Strategy {
+    fn name(&self) -> &'static str;
+
+    /// 最初に見つかったヒント1つを返す（パフォーマンス重視）
+    fn find(&self, sdk: &Sudoku) -> Option<Hint>;
+
+    /// その手筋で見つかる全てのヒントを返す（学習・分析用）
+    fn find_all(&self, sdk: &Sudoku) -> Vec<Hint>;
+}
+
+/// 手筋の結果を表すヒント構造体
+#[derive(Clone, Debug)]
+pub struct Hint {
+    pub description: String,
+    pub assignments: Vec<(usize, u8)>,       // (セル, 数字) の確定
+    pub eliminations: Vec<(usize, Vec<u8>)>, // (セル, [除外数字リスト])
+}
+
+impl Hint {
+    /// ヒントを実際の盤面に適用
+    pub fn apply(self, sdk: &mut Sudoku) -> Result<(), ()> {
+        for (i, d) in self.assignments {
+            sdk.assign(i, d)?;
+        }
+        for (i, ds) in self.eliminations {
+            for d in ds {
+                sdk.eliminate(i, d)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+// ===== ヘルパー関数 =====
+
+/// ビットマスクが1つのbitだけ立っているかチェック
+fn is_single(mask: Mask) -> bool {
+    mask.count_ones() == 1
+}
+
+/// 1つのbitだけ立っているマスクから数字を取得
+fn single_digit(mask: Mask) -> Option<u8> {
+    if !is_single(mask) {
+        return None;
+    }
+    for d in 1..=9 {
+        if mask & bit(d) != 0 {
+            return Some(d);
+        }
+    }
+    None
+}
+
+/// 数字からビットマスクを生成
+fn bit(digit: u8) -> Mask {
+    1u16 << digit
+}
+
+// ===== 具体的な手筋 =====
+
+/// Naked Single: 候補が1つのセルは確定
+///
+/// ヒント内容: 「あるマスに注目して、このマスにはこれしか入らない」
+///
+/// 人が頭の中でやっていること（直感的な説明）
+/// - 1つのマスを見て、そのマスに入れられる数字の候補（1〜9）を考える。
+/// - 候補が1個しか残っていなければ、そのマスはその数字で“確定”。
+///
+/// プログラムでの実装（機械化）
+/// - 盤面はu16のビットマスクで候補を保持（bit1〜bit9 = 数字1〜9）。
+/// - `count_ones()` で候補数を数え、bitが立っている数字を列挙。
+/// - 候補がちょうど1つならヒントを返す（確定自体はしない）。
+pub struct NakedSingle;
+
+impl Strategy for NakedSingle {
+    fn name(&self) -> &'static str {
+        "Naked Single"
+    }
+
+    fn find(&self, sdk: &Sudoku) -> Option<Hint> {
+        // find_allの最初の1つを返す
+        self.find_all(sdk).into_iter().next()
+    }
+
+    fn find_all(&self, sdk: &Sudoku) -> Vec<Hint> {
+        let mut hints = Vec::new();
+
+        for i in 0..81 {
+            // 初期盤面で既に確定済みのセルは除外
+            if !sdk.initially_given[i] && is_single(sdk.cells[i]) {
+                let d = single_digit(sdk.cells[i]).unwrap();
+                hints.push(Hint {
+                    description: format!(
+                        "セル({},{}) は候補が1つ {} なので確定（Naked Single）",
+                        i / 9 + 1,
+                        i % 9 + 1,
+                        d
+                    ),
+                    assignments: vec![(i, d)],
+                    eliminations: vec![],
+                });
+            }
+        }
+
+        hints
+    }
+}
+
+/// Hidden Single: ユニット内で特定の数字を置ける場所が1つ
+///
+/// ヒント内容: 「ある数字に注目して、この列/行/ブロックではここにしか置けない」
+///
+/// 人の思考（例: 数字7）
+/// 1. 着目: 「7について考える」
+/// 2. 制約確認: 既にある数字により、行/列/ブロック内で入れない場所を消す
+/// 3. 候補絞り込み: 行/列/ブロックの中で7を置ける位置を探す
+/// 4. 発見: 入る位置が1つだけなら「ここにしか置けない」
+///
+/// プログラムでの実装（機械化）
+/// - 各ユニット（行/列/ブロック）ごとに、数字1..=9を走査。
+/// - `cells[cell] & (1<<digit) != 0` で、その数字が候補に残るセルのみ抽出。
+/// - 抽出結果が1件なら、その位置と数字でヒントを返す（確定自体はしない）。
+pub struct HiddenSingle;
+
+impl Strategy for HiddenSingle {
+    fn name(&self) -> &'static str {
+        "Hidden Single"
+    }
+
+    fn find(&self, sdk: &Sudoku) -> Option<Hint> {
+        // find_allの最初の1つを返す
+        self.find_all(sdk).into_iter().next()
+    }
+
+    fn find_all(&self, sdk: &Sudoku) -> Vec<Hint> {
+        let mut hints = Vec::new();
+
+        // 【人間思考ステップ1】各制約ユニット（行/列/ブロック）を順番に調べる
+        // 「まず行1を見てみよう」「次に列1を見てみよう」「ブロック(1,1)も確認」
+        for (unit_index, unit) in sdk.units.iter().enumerate() {
+            // 【人間思考ステップ2】そのユニット内で数字1〜9を順番に考える
+            // 「この行で数字1はどこに入るかな？」「数字2はどこ？」
+            for digit in 1..=9 {
+                // 【人間思考ステップ3】その数字が入れられる候補場所を全て探す
+                // 「1が入るのは...ここと、ここと、あとここかな」
+                let possible_cells = self.find_cells_that_can_hold_digit(unit, digit, sdk);
+
+                // 【人間思考ステップ4】候補場所が1つだけなら発見！
+                // 「あ、1が入れるのはここだけだ！確定だね」
+                if possible_cells.len() == 1 {
+                    let target_cell = possible_cells[0];
+
+                    // 既にその場所が確定済みでなければヒント生成
+                    // （確定済みなら当然そこにしか入らないので、ヒントとしては意味ない）
+                    if !is_single(sdk.cells[target_cell]) {
+                        let unit_description = self.describe_unit(unit_index);
+                        let (row, col) = (target_cell / 9 + 1, target_cell % 9 + 1);
+
+                        hints.push(Hint {
+                            description: format!(
+                                "{} で数字 {} を置けるのはセル({},{}) だけ（Hidden Single）",
+                                unit_description, digit, row, col
+                            ),
+                            assignments: vec![(target_cell, digit)],
+                            eliminations: vec![],
+                        });
+                    }
+                }
+            }
+        }
+
+        hints
+    }
+}
+
+impl HiddenSingle {
+    /// 【ヘルパー関数】特定のユニット内で、特定の数字が入れられるセルを全て探す
+    /// 人間が「この行で7が入るのはどこどこ？」と候補を数え上げる処理
+    fn find_cells_that_can_hold_digit(
+        &self,
+        unit: &[usize; 9],
+        digit: u8,
+        sdk: &Sudoku,
+    ) -> Vec<usize> {
+        let digit_mask = bit(digit);
+        let mut possible_cells = Vec::new();
+
+        // ユニット内の9マスを順番にチェック
+        for &cell_index in unit {
+            // そのセルの候補マスクを確認
+            // 「このマスに7は入るかな？候補に7が残ってるかな？」
+            if sdk.cells[cell_index] & digit_mask != 0 {
+                possible_cells.push(cell_index);
+            }
+        }
+
+        possible_cells
+    }
+
+    /// 【ヘルパー関数】ユニットインデックスから人間にわかりやすい名前を生成
+    /// 0 → "行 1"、9 → "列 1"、18 → "ブロック(1, 1)" など
+    fn describe_unit(&self, unit_index: usize) -> String {
+        match unit_index {
+            // 行のユニット (インデックス 0-8)
+            0..=8 => format!("行 {}", unit_index + 1),
+
+            // 列のユニット (インデックス 9-17)
+            9..=17 => format!("列 {}", unit_index - 9 + 1),
+
+            // 3x3ブロックのユニット (インデックス 18-26)
+            _ => {
+                let block_index = unit_index - 18;
+                let block_row = block_index / 3 + 1; // 1, 2, 3
+                let block_col = block_index % 3 + 1; // 1, 2, 3
+                format!("ブロック({}, {})", block_row, block_col)
+            }
+        }
+    }
+}
+
+// ===== ヒントを順に探して適用するエンジン =====
+
+/// 数独解法エンジン
+pub struct Engine {
+    strategies: Vec<Box<dyn Strategy>>,
+}
+
+impl Engine {
+    /// 基本的な手筋を使うエンジンを作成
+    /// 優先順位: Hidden Single -> Naked Single
+    /// (Hidden Singleの方が一般的に見つけにくいため優先)
+    pub fn basic() -> Self {
+        Self {
+            strategies: vec![Box::new(HiddenSingle), Box::new(NakedSingle)],
+        }
+    }
+
+    /// 次に使える手筋を探してヒントを返す（最初の1つ）
+    pub fn next_hint(&self, sdk: &Sudoku) -> Option<Hint> {
+        for s in &self.strategies {
+            if let Some(h) = s.find(sdk) {
+                return Some(h);
+            }
+        }
+        None
+    }
+
+    /// 全ての手筋で見つかる全てのヒントを返す（学習・分析用）
+    pub fn all_hints(&self, sdk: &Sudoku) -> Vec<(String, Vec<Hint>)> {
+        self.strategies
+            .iter()
+            .map(|s| (s.name().to_string(), s.find_all(sdk)))
+            .filter(|(_, hints)| !hints.is_empty())
+            .collect()
+    }
+}
+
 fn main() {
     let p = "\
     .4.....8.\
@@ -377,19 +550,53 @@ fn main() {
     println!("\n=== 候補状態 ===");
     sdk.display();
 
-    println!("\n=== ヒント①: 数字に注目（Hidden Singles） ===");
-    let hints1 = sdk.find_hidden_singles();
-    for hint in &hints1 {
-        println!("{}", hint);
+    println!("\n=== Strategy基盤でのヒント検出 ===");
+    let engine = Engine::basic();
+
+    // まず各手筋を個別にテスト
+    let naked_single = NakedSingle;
+    let hidden_single = HiddenSingle;
+
+    println!("--- Naked Single テスト ---");
+    if let Some(hint) = naked_single.find(&sdk) {
+        println!("Naked Single 発見: {}", hint.description);
+    } else {
+        println!("Naked Single: なし");
     }
 
-    println!("\n=== ヒント②: マスに注目（Naked Singles） ===");
-    let hints2 = sdk.find_naked_singles();
-    for hint in &hints2 {
-        println!("{}", hint);
+    println!("--- Hidden Single テスト ---");
+    if let Some(hint) = hidden_single.find(&sdk) {
+        println!("Hidden Single 発見: {}", hint.description);
+    } else {
+        println!("Hidden Single: なし");
     }
 
-    if hints1.is_empty() && hints2.is_empty() {
-        println!("現在利用可能な基本ヒントはありません");
+    // 新しい方式でヒントを探す（1つだけ）
+    if let Some(hint) = engine.next_hint(&sdk) {
+        println!("\nエンジンが選択: {}", hint.description);
+
+        // ヒントを適用してみる
+        println!("ヒントを適用中...");
+        let mut sdk_copy = sdk.clone();
+        match hint.apply(&mut sdk_copy) {
+            Ok(()) => println!("✓ ヒント適用成功"),
+            Err(()) => println!("✗ ヒント適用失敗（矛盾発生）"),
+        }
+    } else {
+        println!("新しいStrategy基盤では利用可能なヒントがありません");
+    }
+
+    println!("\n=== 全手筋での包括的ヒント検出 ===");
+    let all_hints = engine.all_hints(&sdk);
+
+    for (strategy_name, hints) in &all_hints {
+        println!("--- {} ({} 個発見) ---", strategy_name, hints.len());
+        for (i, hint) in hints.iter().enumerate() {
+            println!("  {}. {}", i + 1, hint.description);
+        }
+    }
+
+    if all_hints.is_empty() {
+        println!("全ての手筋で利用可能なヒントがありません");
     }
 }
