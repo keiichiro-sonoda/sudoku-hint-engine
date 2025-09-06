@@ -47,7 +47,7 @@ impl Strategy for HiddenSingle {
 
                     // 既にその場所が確定済みでなければヒント生成
                     // （確定済みなら当然そこにしか入らないので、ヒントとしては意味ない）
-                    if !is_single(sdk.cell_mask(target_cell)) {
+                    if !sdk.is_confirmed(target_cell) {
                         let unit_description = self.describe_unit(unit_index);
                         let (row, col) = (target_cell / 9 + 1, target_cell % 9 + 1);
 

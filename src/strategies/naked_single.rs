@@ -29,8 +29,8 @@ impl Strategy for NakedSingle {
         let mut hints = Vec::new();
 
         for i in 0..81 {
-            // 初期盤面で既に確定済みのセルは除外
-            if !sdk.initially_given(i) && is_single(sdk.cell_mask(i)) {
+            // 既に確定済みのセルは除外（初期・推論を問わず）
+            if !sdk.is_confirmed(i) && is_single(sdk.cell_mask(i)) {
                 let d = single_digit(sdk.cell_mask(i)).unwrap();
                 hints.push(Hint {
                     description: format!(

@@ -22,6 +22,9 @@ pub struct Sudoku {
 
     /// 初期盤面で確定済みのセルを記録（Naked Singleから除外するため）
     initially_given: [bool; 81], // true = 初期から確定, false = 推論で確定
+
+    /// 現在の盤面で確定済みのセルを記録（初期・推論を問わず確定）
+    confirmed: [bool; 81],
 }
 
 impl Sudoku {
@@ -35,6 +38,7 @@ impl Sudoku {
             peers,
             units,
             initially_given: [false; 81],
+            confirmed: [false; 81],
         }
     }
 
@@ -72,6 +76,7 @@ impl Sudoku {
                 let digit = (byte - b'0') as usize;
                 // 初期盤面で確定済みとしてマーク
                 sdk.initially_given[i] = true;
+                sdk.confirmed[i] = true;
                 // set_value: マス i を digit で確定し、その行・列・ブロックの
                 //            他マスから digit の候補を消します
                 sdk.set_value(i, digit);
@@ -100,8 +105,13 @@ impl Sudoku {
     }
 
     /// 新しいStrategy基盤用: セルに値を割り当て
+    ///
+    /// - `set_value` で確定し、関連セルから候補を除去します。
+    /// - 同じセルに対して繰り返し割り当てないよう、`confirmed` を `true` にします。
     pub fn assign(&mut self, cell: usize, digit: u8) -> Result<(), ()> {
         self.set_value(cell, digit as usize);
+        // 以後 同じセルを繰り返し提案しないようにする
+        self.confirmed[cell] = true;
         Ok(())
     }
 
@@ -195,6 +205,11 @@ impl Sudoku {
     /// initially_givenを確認（外部からアクセス用）
     pub fn initially_given(&self, cell: usize) -> bool {
         self.initially_given[cell]
+    }
+
+    /// confirmed（確定済みか）を確認（外部からアクセス用）
+    pub fn is_confirmed(&self, cell: usize) -> bool {
+        self.confirmed[cell]
     }
 }
 
