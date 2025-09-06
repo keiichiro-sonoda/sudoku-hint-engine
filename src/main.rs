@@ -17,7 +17,7 @@ pub struct Sudoku {
     /// - 全部で 27 ユニット（行 9、列 9、3x3 ブロック 9）。
     /// - 各ユニットは 9 マス分のインデックスを持つ（`usize` の 9 要素）。
     /// - 例えば「行の中でその数字が入る場所は1つだけ」のような一意性チェックに使う。
-    units: Vec<Vec<usize>>, // 27 ユニット (行9, 列9, ブロック9)
+    units: Vec<[usize; 9]>, // 27 ユニット (行9, 列9, ブロック9)
 }
 
 impl Sudoku {
@@ -57,43 +57,90 @@ impl Sudoku {
 /// セルのインデックスは `r*9 + c` （r=行, c=列, 0-based）で計算される。
 /// peersは各セルについて、制約違反チェック時に参照する必要がある
 /// 他のセル群を効率的に取得するために使用される。
-fn precompute() -> (Vec<Vec<usize>>, Vec<Vec<usize>>) {
-    // 行のユニット（0-8行）
-    let row_units: Vec<Vec<usize>> = (0..9)
-        .map(|r| (0..9).map(|c| r * 9 + c).collect())
-        .collect();
+fn precompute() -> (Vec<Vec<usize>>, Vec<[usize; 9]>) {
+    // 27 ユニット x 9 セルを配列で保持
+    let mut units: Vec<[usize; 9]> = Vec::with_capacity(27);
 
-    // 列のユニット（0-8列）
-    let col_units: Vec<Vec<usize>> = (0..9)
-        .map(|c| (0..9).map(|r| r * 9 + c).collect())
-        .collect();
+    // 行
+    for r in 0..9 {
+        let mut u = [0usize; 9];
+        for c in 0..9 {
+            u[c] = r * 9 + c;
+        }
+        units.push(u);
+    }
+    // 列
+    for c in 0..9 {
+        let mut u = [0usize; 9];
+        for r in 0..9 {
+            u[r] = r * 9 + c;
+        }
+        units.push(u);
+    }
+    // ブロック
+    for br in 0..3 {
+        for bc in 0..3 {
+            let mut u = [0usize; 9];
+            let mut k = 0;
+            for dr in 0..3 {
+                for dc in 0..3 {
+                    let r = br * 3 + dr;
+                    let c = bc * 3 + dc;
+                    u[k] = r * 9 + c;
+                    k += 1;
+                }
+            }
+            units.push(u);
+        }
+    }
+    // peers: 各セルの仲間セルを収集（bool フラグで重複除去）
+    let mut peers: Vec<Vec<usize>> = Vec::with_capacity(81);
+    for i in 0..81 {
+        // 81個のboolフラグ配列。trueになったセルがiのpeerになる
+        let mut mark = [false; 81];
 
-    // 3x3ブロックのユニット（9個）
-    let block_units: Vec<Vec<usize>> = (0..3)
-        .flat_map(|block_r| {
-            (0..3).map(move |block_c| {
-                (0..3)
-                    .flat_map(|r| (0..3).map(move |c| (block_r * 3 + r) * 9 + (block_c * 3 + c)))
-                    .collect()
-            })
-        })
-        .collect();
+        // このセルが属する 3 つのユニット（行/列/ブロック）を特定
+        let r = i / 9; // セルiの行番号（0-8）
+        let c = i % 9; // セルiの列番号（0-8）
+        let row_ui = r; // 行ユニットのインデックス（0..=8）
+        let col_ui = 9 + c; // 列ユニットのインデックス（9..=17）
+        let block_ui = 18 + (r / 3) * 3 + (c / 3); // ブロックユニットのインデックス（18..=26）
 
-    let units = [row_units, col_units, block_units].concat();
+        // デバッグ出力（最初の数個のセルのみ）
+        if i < 5 {
+            println!("セル {} (行{}, 列{}) の計算:", i, r, c);
+            println!("  行ユニット[{}]: {:?}", row_ui, units[row_ui]);
+            println!("  列ユニット[{}]: {:?}", col_ui, units[col_ui]);
+            println!("  ブロックユニット[{}]: {:?}", block_ui, units[block_ui]);
+        }
 
-    // peersの計算：各セルについて同じユニットに属する他のセルを収集
-    let peers: Vec<Vec<usize>> = (0..81)
-        .map(|i| {
-            units
-                .iter()
-                .filter(|unit| unit.contains(&i))
-                .flat_map(|unit| unit.iter().copied())
-                .filter(|&cell| cell != i)
-                .collect::<std::collections::HashSet<_>>()
-                .into_iter()
-                .collect()
-        })
-        .collect();
+        // 3つのユニット（行、列、ブロック）のそれぞれについて
+        for &ui in [row_ui, col_ui, block_ui].iter() {
+            // そのユニット内の全セルをmarkに記録（自分自身は除く）
+            for &cell in units[ui].iter() {
+                if cell != i {
+                    mark[cell] = true;
+                    if i < 5 {
+                        println!("    ユニット[{}] から セル {} をpeerに追加", ui, cell);
+                    }
+                }
+            }
+        }
+
+        // 安定した順序（インデックス順）でmarkされたセルを収集
+        let mut v = Vec::with_capacity(20); // 通常20個のpeer
+        for idx in 0..81 {
+            if mark[idx] {
+                v.push(idx);
+            }
+        }
+
+        if i < 5 {
+            println!("  最終的なpeers({} 個): {:?}\n", v.len(), v);
+        }
+
+        peers.push(v);
+    }
 
     (peers, units)
 }
@@ -111,40 +158,6 @@ fn main() {
     ..31....5\
     ";
     println!("{}", p);
-
-    // precomputeの結果をデバッグ出力
-    let (peers, units) = precompute();
-
-    println!("\n=== Units ===");
-    println!("行のユニット (0-8):");
-    for (i, unit) in units.iter().take(9).enumerate() {
-        println!("  行{}: {:?}", i, unit);
-    }
-
-    println!("列のユニット (0-8):");
-    for (i, unit) in units.iter().skip(9).take(9).enumerate() {
-        println!("  列{}: {:?}", i, unit);
-    }
-
-    println!("3x3ブロックのユニット (0-8):");
-    for (i, unit) in units.iter().skip(18).enumerate() {
-        println!("  ブロック{}: {:?}", i, unit);
-    }
-
-    println!("\n=== Peers (例: いくつかのセル) ===");
-    // いくつかの代表的なセルのpeersを表示
-    let test_cells = [0, 4, 40, 80]; // 左上角、上中央、中央、右下角
-    for &cell in &test_cells {
-        let (r, c) = (cell / 9, cell % 9);
-        println!(
-            "セル({},{}) [index={}] のpeers({})個: {:?}",
-            r,
-            c,
-            cell,
-            peers[cell].len(),
-            peers[cell]
-        );
-    }
 
     let _sdk = Sudoku::from_string(p);
 }
