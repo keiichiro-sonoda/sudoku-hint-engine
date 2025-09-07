@@ -170,6 +170,11 @@ fn main() {
 
             if !premature.is_empty() {
                 println!("\n基本戦略（Naked Single/Hidden Single）では、まだ確定できないはずの数字があります:");
+                println!(
+                    "（ユーザーが埋めた {}個中 {}個が早すぎます）",
+                    user_moves.len(),
+                    premature.len()
+                );
 
                 for (i, d) in premature.iter() {
                     println!(
@@ -180,11 +185,41 @@ fn main() {
                     );
                 }
 
+                // 確定できない数字を除外した盤面状態を構築
+                let premature_set: std::collections::HashSet<(usize, u8)> =
+                    premature.iter().copied().collect();
+                let mut corrected_board = vec![None; 81];
+
+                // 初期盤面をコピー
+                for i in 0..81 {
+                    if let Some(d) = user[i] {
+                        // 初期確定の場合はそのまま、ユーザーが埋めた数字で早すぎるもの以外を採用
+                        if base.initially_given(i) || !premature_set.contains(&(i, d)) {
+                            corrected_board[i] = Some(d);
+                        }
+                    }
+                }
+
+                // 除外済み盤面状態を文字列として表示
+                let corrected_board_str: String = corrected_board
+                    .iter()
+                    .map(|cell| match cell {
+                        Some(d) => char::from_digit(*d as u32, 10).unwrap_or('.'),
+                        None => '.',
+                    })
+                    .collect();
+
+                println!("\n早すぎる数字を除外した盤面状態:");
+                for row in 0..9 {
+                    let row_str: String = corrected_board_str[row * 9..(row + 1) * 9]
+                        .chars()
+                        .collect();
+                    println!("{}", row_str);
+                }
+
                 println!("\nヒント: より基本的な手筋から順番に進めることをお勧めします。");
 
                 // 次のアドバイス（手筋）は「早すぎる手」を除いた状態から探索する
-                let premature_set: std::collections::HashSet<(usize, u8)> =
-                    premature.iter().copied().collect();
                 let mut temp_base = Sudoku::from_string(&init_str);
                 for &(i, d) in &user_moves {
                     if !premature_set.contains(&(i, d)) {
