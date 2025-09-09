@@ -6,7 +6,7 @@ mod sudoku;
 use clap::{Parser, Subcommand};
 use engine::Engine;
 use std::fs;
-use strategy::single_digit;
+use strategy::{single_digit, HintLevel};
 use sudoku::Sudoku;
 
 #[derive(Parser)]
@@ -37,12 +37,18 @@ enum Commands {
         /// Path to the user's current board file
         #[arg(short, long)]
         user: String,
+        /// Hint level: weak (default) or full
+        #[arg(short = 'l', long, default_value = "weak")]
+        level: String,
     },
     /// Show next hint for a puzzle
     Hint {
         /// Path to the board file
         #[arg(short, long)]
         board: String,
+        /// Hint level: weak (default) or full
+        #[arg(short = 'l', long, default_value = "weak")]
+        level: String,
     },
 }
 
@@ -60,6 +66,17 @@ fn parse_board(s: &str) -> Vec<Option<u8>> {
             }
         })
         .collect()
+}
+
+fn parse_hint_level(level_str: &str) -> HintLevel {
+    match level_str.to_lowercase().as_str() {
+        "weak" => HintLevel::Weak,
+        "full" => HintLevel::Full,
+        _ => {
+            eprintln!("無効なヒントレベル: {}. 'weak' または 'full' を指定してください。", level_str);
+            std::process::exit(1);
+        }
+    }
 }
 
 fn main() {
@@ -100,7 +117,8 @@ fn main() {
             sdk.display();
         }
 
-        Commands::Advise { initial, user } => {
+        Commands::Advise { initial, user, level } => {
+            let hint_level = parse_hint_level(&level);
             let init_str = fs::read_to_string(&initial)
                 .unwrap_or_else(|_| panic!("Failed to read initial board file: {}", initial));
             let user_str = fs::read_to_string(&user)
@@ -228,7 +246,7 @@ fn main() {
                 }
 
                 let eng = Engine::basic();
-                if let Some((strategy_name, hint)) = eng.next_hint_with_name(&temp_base) {
+                if let Some((strategy_name, hint)) = eng.next_hint_with_name_and_level(&temp_base, hint_level) {
                     println!(
                         "まず次の手から始めてみてください [{}]: {}",
                         strategy_name, hint.description
@@ -299,14 +317,15 @@ fn main() {
 
             // 次のアドバイス（手筋）を提示
             let eng = Engine::basic();
-            if let Some((name, hint)) = eng.next_hint_with_name(&base) {
+            if let Some((name, hint)) = eng.next_hint_with_name_and_level(&base, hint_level) {
                 println!("次のアドバイス [{}]: {}", name, hint.description);
             } else {
                 println!("次のアドバイス: 現在の手筋では見つかりません（詰み/高難度手筋が必要）");
             }
         }
 
-        Commands::Hint { board } => {
+        Commands::Hint { board, level } => {
+            let hint_level = parse_hint_level(&level);
             let board_str = fs::read_to_string(&board)
                 .unwrap_or_else(|_| panic!("Failed to read board file: {}", board));
 
@@ -319,7 +338,7 @@ fn main() {
             println!("\n現在の候補状態:");
             sdk.display();
 
-            if let Some((name, hint)) = engine.next_hint_with_name(&sdk) {
+            if let Some((name, hint)) = engine.next_hint_with_name_and_level(&sdk, hint_level) {
                 println!("\n次のヒント [{}]: {}", name, hint.description);
             } else {
                 println!("\n利用可能なヒントはありません");

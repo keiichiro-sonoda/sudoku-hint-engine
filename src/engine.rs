@@ -1,5 +1,5 @@
 use crate::strategies::{HiddenSingle, NakedSingle};
-use crate::strategy::{bit, is_single, Hint, Strategy};
+use crate::strategy::{bit, is_single, Hint, HintLevel, Strategy};
 use crate::sudoku::Sudoku;
 
 /// 数独解法エンジン
@@ -31,6 +31,26 @@ impl Engine {
     pub fn next_hint_with_name(&self, sdk: &Sudoku) -> Option<(String, Hint)> {
         for s in &self.strategies {
             if let Some(h) = s.find(sdk) {
+                return Some((s.name().to_string(), h));
+            }
+        }
+        None
+    }
+
+    /// 指定されたレベルで次に使える手筋を探してヒントを返す（最初の1つ）
+    pub fn next_hint_with_level(&self, sdk: &Sudoku, level: HintLevel) -> Option<Hint> {
+        for s in &self.strategies {
+            if let Some(h) = s.find_with_level(sdk, level) {
+                return Some(h);
+            }
+        }
+        None
+    }
+
+    /// 指定されたレベルでStrategy名も併せて次のヒントを返す
+    pub fn next_hint_with_name_and_level(&self, sdk: &Sudoku, level: HintLevel) -> Option<(String, Hint)> {
+        for s in &self.strategies {
+            if let Some(h) = s.find_with_level(sdk, level) {
                 return Some((s.name().to_string(), h));
             }
         }

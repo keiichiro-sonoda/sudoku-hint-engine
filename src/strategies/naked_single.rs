@@ -1,4 +1,4 @@
-use crate::strategy::{is_single, single_digit, Hint, Strategy};
+use crate::strategy::{is_single, single_digit, Hint, HintLevel, Strategy};
 use crate::sudoku::Sudoku;
 
 /// Naked Single: 候補が1つのセルは確定
@@ -26,22 +26,40 @@ impl Strategy for NakedSingle {
     }
 
     fn find_all(&self, sdk: &Sudoku) -> Vec<Hint> {
+        self.find_all_with_level(sdk, HintLevel::Full)
+    }
+
+    fn find_with_level(&self, sdk: &Sudoku, level: HintLevel) -> Option<Hint> {
+        self.find_all_with_level(sdk, level).into_iter().next()
+    }
+
+    fn find_all_with_level(&self, sdk: &Sudoku, level: HintLevel) -> Vec<Hint> {
         let mut hints = Vec::new();
 
         for i in 0..81 {
             // 既に確定済みのセルは除外（初期・推論を問わず）
             if !sdk.is_confirmed(i) && is_single(sdk.cell_mask(i)) {
                 let d = single_digit(sdk.cell_mask(i)).unwrap();
-                hints.push(Hint {
-                    description: format!(
-                        "セル({},{}) は候補が1つ {} なので確定（Naked Single）",
-                        i / 9 + 1,
-                        i % 9 + 1,
-                        d
-                    ),
-                    assignments: vec![(i, d)],
-                    eliminations: vec![],
-                });
+                
+                let hint = match level {
+                    HintLevel::Weak => Hint {
+                        description: format!("数字 {} に注目してください", d),
+                        assignments: vec![(i, d)],
+                        eliminations: vec![],
+                    },
+                    HintLevel::Full => Hint {
+                        description: format!(
+                            "セル({},{}) は候補が1つ {} なので確定（Naked Single）",
+                            i / 9 + 1,
+                            i % 9 + 1,
+                            d
+                        ),
+                        assignments: vec![(i, d)],
+                        eliminations: vec![],
+                    },
+                };
+                
+                hints.push(hint);
             }
         }
 

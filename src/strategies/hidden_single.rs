@@ -1,4 +1,4 @@
-use crate::strategy::{bit, Hint, Strategy};
+use crate::strategy::{bit, Hint, HintLevel, Strategy};
 use crate::sudoku::Sudoku;
 
 /// Hidden Single: ユニット内で特定の数字を置ける場所が1つ
@@ -28,6 +28,14 @@ impl Strategy for HiddenSingle {
     }
 
     fn find_all(&self, sdk: &Sudoku) -> Vec<Hint> {
+        self.find_all_with_level(sdk, HintLevel::Full)
+    }
+
+    fn find_with_level(&self, sdk: &Sudoku, level: HintLevel) -> Option<Hint> {
+        self.find_all_with_level(sdk, level).into_iter().next()
+    }
+
+    fn find_all_with_level(&self, sdk: &Sudoku, level: HintLevel) -> Vec<Hint> {
         let mut hints = Vec::new();
 
         // 【人間思考ステップ1】各制約ユニット（行/列/ブロック）を順番に調べる
@@ -51,14 +59,23 @@ impl Strategy for HiddenSingle {
                         let unit_description = self.describe_unit(unit_index);
                         let (row, col) = (target_cell / 9 + 1, target_cell % 9 + 1);
 
-                        hints.push(Hint {
-                            description: format!(
-                                "{} で数字 {} を置けるのはセル({},{}) だけ（Hidden Single）",
-                                unit_description, digit, row, col
-                            ),
-                            assignments: vec![(target_cell, digit)],
-                            eliminations: vec![],
-                        });
+                        let hint = match level {
+                            HintLevel::Weak => Hint {
+                                description: format!("{} に注目してください", unit_description),
+                                assignments: vec![(target_cell, digit)],
+                                eliminations: vec![],
+                            },
+                            HintLevel::Full => Hint {
+                                description: format!(
+                                    "{} で数字 {} を置けるのはセル({},{}) だけ（Hidden Single）",
+                                    unit_description, digit, row, col
+                                ),
+                                assignments: vec![(target_cell, digit)],
+                                eliminations: vec![],
+                            },
+                        };
+
+                        hints.push(hint);
                     }
                 }
             }

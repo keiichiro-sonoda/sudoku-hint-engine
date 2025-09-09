@@ -11,6 +11,21 @@ pub trait Strategy {
 
     /// その手筋で見つかる全てのヒントを返す（学習・分析用）
     fn find_all(&self, sdk: &Sudoku) -> Vec<Hint>;
+
+    /// 指定されたレベルでヒントを返す
+    fn find_with_level(&self, sdk: &Sudoku, level: HintLevel) -> Option<Hint>;
+
+    /// 指定されたレベルで全てのヒントを返す
+    fn find_all_with_level(&self, sdk: &Sudoku, level: HintLevel) -> Vec<Hint>;
+}
+
+/// ヒントの強さレベル
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum HintLevel {
+    /// 最も弱いヒント（注目すべき数字やユニットのみ）
+    Weak,
+    /// 完全なヒント（具体的なセルと数字を指定）
+    Full,
 }
 
 /// 手筋の結果を表すヒント構造体
