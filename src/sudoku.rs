@@ -98,8 +98,15 @@ impl Sudoku {
         // セル自身を確定値のみに設定
         self.cells[cell] = mask;
 
-        // peersから候補を除外
+        // peersから候補を除外（ただし既に確定済みのセルは除く）
         for &peer in &self.peers[cell] {
+            let old_mask = self.cells[peer];
+
+            // 既に確定済み（single bit）のセルは候補除去しない
+            if old_mask.count_ones() == 1 {
+                continue;
+            }
+
             self.cells[peer] &= !mask;
         }
     }
